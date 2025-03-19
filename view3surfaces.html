@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>3D Surface Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            height: 100vh;
+        }
+
+        #menu {
+            width: 250px;
+            background: #2c3e50;
+            padding: 20px;
+            overflow-y: auto;
+            color: white;
+        }
+
+        #viewer {
+            flex: 1;
+            position: relative;
+        }
+
+        .surface-link {
+            color: #ecf0f1;
+            text-decoration: none;
+            padding: 10px;
+            display: block;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            transition: background 0.3s;
+        }
+
+        .surface-link:hover {
+            background: #34495e;
+        }
+
+        #zScale {
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%
+        }
+    </style>
+</head>
+
+<body>
+    <div id="menu">
+        <h2 style="margin-top: 0">Surfaces</h2>
+        <a href="#" class="surface-link" onclick="loadSurface('sine-wave')">1. Sine Wave</a>
+        <a href="#" class="surface-link" onclick="loadSurface('flat-plane')">2. Flat Plane</a>
+        <a href="#" class="surface-link" onclick="loadSurface('random-hills')">3. Random Hills</a>
+        <a href="#" class="surface-link" onclick="loadSurface('scattered-sine')">4. Scattered Sine</a>
+
+        <div style="margin-top: 30px">
+            <label>Z Scale: <span id="scaleValue">1.0</span>x</label>
+            <input type="range" id="zScale" min="0.1" max="5" step="0.1" value="1" oninput="updateZScale(this.value)">
+        </div>
+    </div>
+    <div id="viewer"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script>
+        let currentSurface = null;
+        let currentGeometry = null;
+        let originalZValues = null;
+        let currentScale = 1;
+        let camera, controls, renderer, scene;
+
+        function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(document.getElementById('viewer').offsetWidth, window.innerHeight);
+            document.getElementById('viewer').appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(ambientLight, directionalLight);
+
+            // Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            camera.position.set(0, 30, 50);
+            controls.update();
+
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+        }
+
+        const surfaces = {
+            'sine-wave': {
+                generate: (size, segments) => {
+                    const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+                    const positions = geometry.attributes.position.array;
+                    for (let i = 0; i <= segments; i++) {
+                        for (let j = 0; j <= segments; j++) {
+                            const idx = (i * (segments + 1) + j) * 3;
+                            const x = (i / segments - 0.5) * Math.PI * 4;
+                            const y = (j / segments - 0.5) * Math.PI * 4;
+                            positions[idx + 2] = Math.sin(Math.sqrt(x * x + y * y));
+                        }
+                    }
+                    return geometry;
+                }
+            },
+            'flat-plane': {
+                generate: (size, segments) => new THREE.PlaneGeometry(size, size, segments, segments)
+            },
+            'random-hills': {
+                generate: (size, segments) => {
+                    const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+                    const positions = geometry.attributes.position.array;
+                    for (let i = 0; i <= segments; i++) {
+                        for (let j = 0; j <= segments; j++) {
+                            const idx = (i * (segments + 1) + j) * 3;
+                            positions[idx + 2] = Math.random() * 3;
+                        }
+                    }
+                    return geometry;
+                }
+            },
+            'scattered-sine': {
+                generate: (size, segments) => {
+                    const num_points = segments * segments;
+                    const scale = Math.PI * 4 / size;
+                    const points = Array.from({ length: num_points }, () => {
+                        const x = (Math.random() - 0.5) * size;
+                        const y = (Math.random() - 0.5) * size;
+                        return { x, y, z: Math.sin(scale * Math.sqrt(x * x + y * y)) };
+                    });
+                    return createSurfaceFromPoints(points, size, segments);
+                }
+            }
+        };
+
+        function createSurfaceFromPoints(points, size, segments) {
+            // 1. Create Delaunay triangulation of input points
+            const delaunay = d3.Delaunay.from(points.map(p => [p.x, p.y]));
+            const triangles = delaunay.triangles;
+
+            // 2. Create regular grid geometry
+            const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+            const positions = geometry.attributes.position.array;
+            const gridSize = segments + 1;
+
+            // 3. Interpolate Z-values for each grid point
+            for (let i = 0; i < gridSize; i++) {
+                for (let j = 0; j < gridSize; j++) {
+                    const idx = (i * gridSize + j) * 3;
+                    const x = (i / segments - 0.5) * size;
+                    const y = (j / segments - 0.5) * size;
+
+                    //const i1 = delaunay.find(x, y);
+                    //const i2 = delaunay.neighbors(i1);
+                    //positions[idx + 2] = points[i1].z;
+                    //const scale = Math.PI * 4 / size;
+                    //positions[idx + 2] = Math.sin(scale * Math.sqrt(x * x + y * y));
+                    // Find nearest point index
+                    const nearestIdx = delaunay.find(x, y);
+
+                    // Get neighbors for the nearest point
+                    const neighbors = delaunay.neighbors(nearestIdx);
+                    const candidates = [nearestIdx, ...neighbors].filter(n => n !== undefined);
+
+                    // Inverse Distance Weighting (IDW) interpolation
+                    let totalWeight = 0;
+                    let weightedZ = 0;
+
+                    for (const pointIdx of candidates) {
+                        const p = points[pointIdx];
+                        const dx = x - p.x;
+                        const dy = y - p.y;
+                        const distSq = dx * dx + dy * dy;
+
+                        // Avoid division by zero for exact matches
+                        const weight = 1 / (distSq + 1e-6);
+
+                        weightedZ += weight * p.z;
+                        totalWeight += weight;
+                    }
+
+                    positions[idx + 2] = weightedZ / totalWeight;
+                }
+            }
+
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        // Helper functions
+        function pointInTriangle(x, y, a, b, c) {
+            const area = 0.5 * (-b.y * c.x + a.y * (-b.x + c.x) + a.x * (b.y - c.y) + b.x * c.y);
+            const s = 1 / (2 * area) * (a.y * c.x - a.x * c.y + (c.y - a.y) * x + (a.x - c.x) * y);
+            const t = 1 / (2 * area) * (a.x * b.y - a.y * b.x + (a.y - b.y) * x + (b.x - a.x) * y);
+            return s >= 0 && t >= 0 && (s + t) <= 1;
+        }
+
+        function barycentricWeights(x, y, a, b, c) {
+            const denom = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+            const w0 = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / denom;
+            const w1 = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / denom;
+            return [w0, w1, 1 - w0 - w1];
+        }
+
+        function findNearestZ(x, y, points) {
+            let minDist = Infinity;
+            let nearestZ = 0;
+            points.forEach(p => {
+                const dist = (p.x - x) ** 2 + (p.y - y) ** 2;
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearestZ = p.z;
+                }
+            });
+            return nearestZ;
+        }
+
+        function loadSurface(surfaceId) {
+            if (currentSurface) scene.remove(currentSurface);
+
+            const size = 30;
+            const segments = 200;
+            const geometry = surfaces[surfaceId].generate(size, segments);
+
+            // Store original Z values
+            originalZValues = new Float32Array(geometry.attributes.position.array.length / 3);
+            const positions = geometry.attributes.position.array;
+            for (let i = 0; i < originalZValues.length; i++) {
+                originalZValues[i] = positions[i * 3 + 2];
+            }
+
+            currentGeometry = geometry;
+            applyZScale(1);
+            updateColorCoding();
+
+            const material = new THREE.MeshPhongMaterial({
+                vertexColors: true,
+                shininess: 100
+            });
+
+            currentSurface = new THREE.Mesh(geometry, material);
+            currentSurface.rotation.x = -Math.PI / 2;
+            scene.add(currentSurface);
+
+            // Reset controls
+            document.getElementById('zScale').value = 1;
+            document.getElementById('scaleValue').textContent = '1.0';
+            camera.position.set(0, 30, 50);
+            controls.target.set(0, 0, 0);
+            controls.update();
+        }
+
+        function applyZScale(scale) {
+            if (!currentGeometry) return;
+            const positions = currentGeometry.attributes.position.array;
+            for (let i = 0; i < originalZValues.length; i++) {
+                positions[i * 3 + 2] = originalZValues[i] * scale;
+            }
+            currentGeometry.attributes.position.needsUpdate = true;
+            currentGeometry.computeBoundingSphere();
+            currentScale = scale;
+        }
+
+        function updateColorCoding() {
+            if (!currentGeometry) return;
+            const positions = currentGeometry.attributes.position.array;
+            const zValues = Array.from({ length: positions.length / 3 }, (_, i) => positions[i * 3 + 2]);
+
+            const minZ = Math.min(...zValues);
+            const maxZ = Math.max(...zValues);
+            const colors = new Float32Array(zValues.length * 3);
+            const color = new THREE.Color();
+
+            zValues.forEach((z, i) => {
+                const normalizedZ = (maxZ === minZ) ? 0 : (z - minZ) / (maxZ - minZ);
+                color.setHSL(0.7 * (0.5 + normalizedZ), 0.8, 0.5);
+                colors[i * 3] = color.r;
+                colors[i * 3 + 1] = color.g;
+                colors[i * 3 + 2] = color.b;
+            });
+
+            currentGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            currentGeometry.attributes.color.needsUpdate = true;
+        }
+
+        function updateZScale(scale) {
+            document.getElementById('scaleValue').textContent = parseFloat(scale).toFixed(1);
+            applyZScale(scale);
+            updateColorCoding();
+        }
+
+        // Initialization
+        initThree();
+        loadSurface('sine-wave');
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = document.getElementById('viewer').offsetWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(document.getElementById('viewer').offsetWidth, window.innerHeight);
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>3D Surface Visualization</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: Arial;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="info">Drag mouse to rotate • Scroll to zoom</div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        // Camera setup
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.2, 1000);
+        camera.position.set(0, 0, 50);
+        camera.lookAt(0, 0, 10);
+
+        // Add OrbitControls for fine-tuning
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+
+        // Create surface geometry
+        const size = 30;
+        const segments = 50;
+
+        // Generate height data (example: sine wave pattern)
+        const heights = new Float32Array((segments + 1) ** 2);
+        for (let i = 0; i <= segments; i++) {
+            for (let j = 0; j <= segments; j++) {
+                const x = (i / segments - 0.5) * Math.PI * 4;
+                const y = (j / segments - 0.5) * Math.PI * 4;
+                heights[i * (segments + 1) + j] = Math.sin(Math.sqrt(x * x + y * y));
+            }
+        }
+
+        // Create geometry with colors based on height
+        // Create geometry with proper coordinate handling
+        const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+        const positions = geometry.attributes.position.array;
+
+        // Modify Z-coordinates only
+        for (let i = 0; i <= segments; i++) {
+            for (let j = 0; j <= segments; j++) {
+                const idx = (i * (segments + 1) + j) * 3;
+                const x = (i / segments - 0.5) * Math.PI * 4;
+                const y = (j / segments - 0.5) * Math.PI * 4;
+                positions[idx + 2] = Math.sin(Math.sqrt(x * x + y * y)); // Set Z at idx+2
+            }
+        }
+
+        geometry.attributes.position.needsUpdate = true;
+        geometry.computeBoundingSphere();
+
+        // Rest of your original code (materials, lights, etc) stays the same        
+        // Color coding based on height
+        const colors = [];
+        const color = new THREE.Color();
+        for (let i = 0; i < geometry.attributes.position.count; i++) {
+            const z = geometry.attributes.position.getZ(i);
+            color.setHSL(0.7 * (0.5 + z / 2), 0.8, 0.5);
+            colors.push(color.r, color.g, color.b);
+        }
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+        // Create material with vertex colors
+        const material = new THREE.MeshPhongMaterial({
+            vertexColors: true,
+            wireframe: false,
+            shininess: 100
+        });
+
+        const surface = new THREE.Mesh(geometry, material);
+        surface.rotation.x = -Math.PI / 2;
+        scene.add(surface);
+
+        // Add lights
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+
+        camera.position.z = 40;
+
+        // Mouse interaction variables
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+
+        // Event listeners
+        document.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            previousMousePosition = {
+                x: e.clientX,
+                y: e.clientY
+            };
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+
+            const deltaMove = {
+                x: e.clientX - previousMousePosition.x,
+                y: e.clientY - previousMousePosition.y
+            };
+
+            surface.rotation.z += deltaMove.x * 0.01;
+            surface.rotation.x += deltaMove.y * 0.01;
+
+            previousMousePosition = {
+                x: e.clientX,
+                y: e.clientY
+            };
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        // Add this after your existing rotation event listeners
+
+        // Zoom control
+        const zoomSpeed = 0.2;
+        document.addEventListener('wheel', function (e) {
+            e.preventDefault();
+            camera.position.z += e.deltaY * zoomSpeed;
+            camera.position.z = Math.max(10, Math.min(100, camera.position.z));
+        }, { passive: false });
+
+        // Make sure your camera starts at reasonable distance
+        camera.position.z = 40; // Initial zoom level
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+
+</html>
