@@ -5,7 +5,7 @@ __Try one of:__
 - [View CODE on GitHub](view3surfaces.html)  
 
 __Prompts used.__  
-Initial prompt was far from perfect, but anyway it worked
+Initial prompt was far from perfect, but anyway it gained some code
 ```
 how can i write a code for a web application that displays isometric or like view of a 3D mesh-represented surface that user could then rotate with a mouse to change view angles? Surface picture may be wireframe or preferably colour-coded (height in Z direction is colour-coded)? Application should run in browser and use any language that is availble, e.g. javascript.
 ```
