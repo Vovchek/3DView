@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Advanced STL Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: sans-serif;
+        }
+
+        #fileInput,
+        #resetButton {
+            position: absolute;
+            z-index: 10;
+            margin: 10px;
+            padding: 5px;
+        }
+
+        #fileInput {
+            top: 10px;
+            left: 10px;
+        }
+
+        #resetButton {
+            top: 10px;
+            left: 160px;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #dropZone {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 24px;
+            pointer-events: none;
+        }
+    </style>
+
+    <!-- Three.js and extras -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+</head>
+
+<body>
+    <input type="file" id="fileInput" multiple accept=".stl,.step,.stp" />
+    <button id="resetButton">Reset View</button>
+    <div id="dropZone">Drop STL files here</div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        const stlObjects = [];
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 100);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+            addLights();
+            animate();
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function addLights() {
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(ambientLight, directionalLight);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function handleFile(file) {
+            const name = file.name.toLowerCase();
+            if (name.endsWith('.stl')) {
+                loadSTL(file);
+            } else if (name.endsWith('.step') || name.endsWith('.stp')) {
+                const formData = new FormData();
+                formData.append("file", file);
+
+                fetch('http://localhost:5000/convert', {
+                    method: 'POST',
+                    body: formData
+                })
+                    .then(res => {
+                        if (!res.ok) throw new Error("Conversion failed on server.");
+                        return res.arrayBuffer();
+                    })
+                    .then(buffer => {
+                        const loader = new THREE.STLLoader();
+                        const geometry = loader.parse(buffer);
+                        geometry.center();
+
+                        const material = new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff });
+                        const mesh = new THREE.Mesh(geometry, material);
+                        scene.add(mesh);
+                        stlObjects.push(mesh);
+                        fitViewToModel();
+                    })
+                    .catch(err => alert('Conversion failed: ' + err.message));
+            } else {
+                alert("Unsupported file type.");
+            }
+        }
+
+        function loadSTL(file) {
+            const reader = new FileReader();
+            const loader = new THREE.STLLoader();
+
+            reader.onload = function (event) {
+                const geometry = loader.parse(event.target.result);
+                geometry.center();
+
+                const material = new THREE.MeshStandardMaterial({
+                    color: Math.random() * 0xffffff,
+                    metalness: 0.2,
+                    roughness: 0.8
+                });
+
+                const mesh = new THREE.Mesh(geometry, material);
+                scene.add(mesh);
+                stlObjects.push(mesh);
+                fitViewToModel();
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        function fitViewToModel() {
+            const box = new THREE.Box3();
+
+            stlObjects.forEach(obj => {
+                box.expandByObject(obj);
+            });
+
+            const size = new THREE.Vector3();
+            box.getSize(size);
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const distance = maxDim * 1.5;
+
+            camera.position.copy(center).add(new THREE.Vector3(distance, distance, distance));
+            camera.lookAt(center);
+            controls.target.copy(center);
+            controls.update();
+        }
+
+        function clearScene() {
+            stlObjects.forEach(obj => scene.remove(obj));
+            stlObjects.length = 0;
+        }
+
+        document.getElementById('fileInput').addEventListener('change', (event) => {
+            const files = event.target.files;
+            if (files.length > 0) {
+                clearScene();
+                [...files].forEach(handleFile);
+            }
+        });
+
+        document.getElementById('resetButton').addEventListener('click', fitViewToModel);
+
+        // Drag and Drop
+        const dropZone = document.getElementById('dropZone');
+
+        window.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.display = 'flex';
+        });
+
+        window.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.style.display = 'none';
+        });
+
+        window.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.display = 'none';
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                clearScene();
+                [...files].forEach(handleFile);
+            }
+        });
+
+        init();
+    </script>
+</body>
+
+</html>
